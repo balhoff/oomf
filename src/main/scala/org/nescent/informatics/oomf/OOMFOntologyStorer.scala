@@ -1,31 +1,34 @@
 package org.nescent.informatics.oomf
 
+import java.io.BufferedWriter
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStreamWriter
+import java.net.URLEncoder
+
 import scala.collection.JavaConversions._
+import scala.collection.mutable.Set
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.Map
-import scala.collection.mutable.Set
+
+import org.apache.commons.codec.digest.DigestUtils
 import org.apache.commons.io.FileUtils
+import org.nescent.informatics.oomf.OOMFOntologyFormat
+import org.semanticweb.owlapi.apibinding.OWLManager
+import org.semanticweb.owlapi.io.OWLFunctionalSyntaxOntologyFormat
 import org.semanticweb.owlapi.io.OWLOntologyDocumentTarget
+import org.semanticweb.owlapi.io.StringDocumentTarget
+import org.semanticweb.owlapi.model.AddImport
+import org.semanticweb.owlapi.model.AddOntologyAnnotation
 import org.semanticweb.owlapi.model.IRI
 import org.semanticweb.owlapi.model.OWLAxiom
 import org.semanticweb.owlapi.model.OWLOntology
 import org.semanticweb.owlapi.model.OWLOntologyFormat
 import org.semanticweb.owlapi.model.OWLOntologyManager
 import org.semanticweb.owlapi.model.OWLOntologyStorer
+import org.semanticweb.owlapi.util.DefaultPrefixManager
 import org.semanticweb.owlapi.util.OWLOntologyWalker
-import java.net.URLEncoder
-import org.semanticweb.owlapi.apibinding.OWLManager
-import org.semanticweb.owlapi.io.OWLFunctionalSyntaxOntologyFormat
-import org.apache.commons.codec.digest.DigestUtils
-import org.semanticweb.owlapi.model.AddImport
-import org.semanticweb.owlapi.model.AddOntologyAnnotation
-import org.semanticweb.owlapi.io.StringDocumentTarget
-import java.io.BufferedWriter
-import java.io.FileWriter
-import java.io.BufferedOutputStream
-import java.io.FileOutputStream
-import java.io.OutputStreamWriter
+import org.semanticweb.owlapi.vocab.PrefixOWLOntologyFormat
 
 class OOMFOntologyStorer extends OWLOntologyStorer {
 
@@ -40,7 +43,7 @@ class OOMFOntologyStorer extends OWLOntologyStorer {
 			val dataFolder = OOMFOntologyFormat.dataFolderForFile(mainFile);
 			val axiomGroups = this.chunkOntology(ontology);
 			FileUtils.cleanDirectory(dataFolder);
-			axiomGroups.foreach((group) => writeAxiomGroupToFile(group._1, group._2, dataFolder));
+			axiomGroups.foreach((group) => writeAxiomGroupToFile(group._1, group._2, dataFolder, format.asPrefixOWLOntologyFormat()));
 			val shellOntology = this.shellOntologyForOntology(ontology);
 			val loadedFormat = ontology.getOWLOntologyManager().getOntologyFormat(ontology);
 			val shellFormat = new OWLFunctionalSyntaxOntologyFormat();
@@ -67,11 +70,19 @@ class OOMFOntologyStorer extends OWLOntologyStorer {
 			return axiomGroups;
 	}
 
-	def writeAxiomGroupToFile(iri: IRI, axioms: Set[OWLAxiom], parentFolder: File): Unit = {
+	def writeAxiomGroupToFile(iri: IRI, axioms: Set[OWLAxiom], parentFolder: File, format: PrefixOWLOntologyFormat): Unit = {
 			val manager = OWLManager.createOWLOntologyManager();
-			val filename = filenameForIRI(iri);
-			val subFolder = folderForFilename(parentFolder, filename);
-			val file = new File(subFolder, filename);
+			val prefixer = new DefaultPrefixManager(format);
+			val file = if (prefixer.getPrefixIRI(iri) == null) {
+				val filename = filenameForName(iri.toString());
+				new File(folderForFilename(new File(parentFolder, "default"), filename), filename);
+			} else {
+				val shortName = prefixer.getShortForm(iri);
+				val parts = shortName.split(":", 2);
+				val prefix = parts(0);
+				val filename = filenameForName(parts(1));
+				new File(folderForFilename(new File(parentFolder, prefix), filename), filename);
+			}
 			val ontologyIRI = IRI.create(iri.toString() + "/ontology");
 			val groupOntology = manager.createOntology(axioms, ontologyIRI);
 			manager.saveOntology(groupOntology, new OWLFunctionalSyntaxOntologyFormat(), IRI.create(file));		
@@ -82,9 +93,13 @@ class OOMFOntologyStorer extends OWLOntologyStorer {
 			return new File(new File(parent, "%02x".format((bytes(0) + 128))), "%02x".format((bytes(1) + 128)));
 	}
 
-	def filenameForIRI(iri: IRI): String = {
-			return URLEncoder.encode(iri.toString(), "UTF-8") + ".ofn";
+	def filenameForName(name: String): String = {
+			return URLEncoder.encode(name, "UTF-8") + ".ofn";
 	}
+
+	//	def filenameForIRI(iri: IRI): String = {
+	//			return URLEncoder.encode(iri.toString(), "UTF-8") + ".ofn";
+	//	}
 
 	def shellOntologyForOntology(ontology: OWLOntology): OWLOntology = {
 			val shellManager = OWLManager.createOWLOntologyManager();
